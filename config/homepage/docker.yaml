@@ -1,0 +1,4 @@
+# Docker integration (optional - for container status)
+---
+my-docker:
+  socket: /var/run/docker.sock

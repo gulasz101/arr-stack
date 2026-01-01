@@ -1,0 +1,61 @@
+# Services configuration
+# Using host.docker.internal to reach services exposed on host ports
+---
+- Media Management:
+    - Sonarr:
+        icon: sonarr.png
+        href: http://localhost:8989
+        description: TV Series
+        widget:
+          type: sonarr
+          url: http://host.docker.internal:8989
+          key: {{HOMEPAGE_VAR_SONARR_API_KEY}}
+
+    - Radarr:
+        icon: radarr.png
+        href: http://localhost:7878
+        description: Movies
+        widget:
+          type: radarr
+          url: http://host.docker.internal:7878
+          key: {{HOMEPAGE_VAR_RADARR_API_KEY}}
+
+    - Prowlarr:
+        icon: prowlarr.png
+        href: http://localhost:9696
+        description: Indexer Manager
+        widget:
+          type: prowlarr
+          url: http://host.docker.internal:9696
+          key: {{HOMEPAGE_VAR_PROWLARR_API_KEY}}
+
+- Downloads:
+    - qBittorrent:
+        icon: qbittorrent.png
+        href: http://localhost:8080
+        description: Torrent Client
+        widget:
+          type: qbittorrent
+          url: http://host.docker.internal:8080
+          username: admin
+          password: {{HOMEPAGE_VAR_QBITTORRENT_PASSWORD}}
+
+    - Bazarr:
+        icon: bazarr.png
+        href: http://localhost:6767
+        description: Subtitles
+        widget:
+          type: bazarr
+          url: http://host.docker.internal:6767
+          key: {{HOMEPAGE_VAR_BAZARR_API_KEY}}
+
+- Streaming:
+    - Jellyfin:
+        icon: jellyfin.png
+        href: http://localhost:8096
+        description: Media Server
+        widget:
+          type: jellyfin
+          url: http://host.docker.internal:8096
+          key: {{HOMEPAGE_VAR_JELLYFIN_API_KEY}}
+          enableBlocks: true
