@@ -1,0 +1,42 @@
+# Environment file with secrets
+.env
+
+# Backup files
+*.bak
+
+# ===========================================
+# Config directories - contain API keys and secrets
+# ===========================================
+# Sonarr/Radarr/Prowlarr - config.xml contains API keys
+config/sonarr/
+config/radarr/
+config/prowlarr/
+
+# qBittorrent - contains session data and settings
+config/qbittorrent/
+
+# Bazarr - config.yaml contains API keys and provider credentials
+config/bazarr/
+
+# Jellyfin - contains user data and API keys
+config/jellyfin/
+
+# Gluetun - contains VPN state
+config/gluetun/
+
+# FlareSolverr - runtime data
+config/flaresolverr/
+
+# Homepage logs
+config/homepage/logs/
+
+# ===========================================
+# macOS
+# ===========================================
+.DS_Store
+
+# ===========================================
+# IDE
+# ===========================================
+.idea/
+.vscode/

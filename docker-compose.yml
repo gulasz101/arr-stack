@@ -1,0 +1,198 @@
+# ===========================================
+# Using 'latest' tags - for pinned versions check:
+# https://github.com/linuxserver/docker-{app}/releases
+# ===========================================
+
+services:
+  # ===========================================
+  # GLUETUN - VPN Container
+  # Using v3 tag for stable releases (recommended by maintainer)
+  # ===========================================
+  gluetun:
+    image: qmcgaw/gluetun:v3
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - 8080:8080   # qBittorrent WebUI
+      - 6881:6881   # qBittorrent torrent port
+      - 6881:6881/udp
+      - 9696:9696   # Prowlarr
+      - 8989:8989   # Sonarr
+      - 7878:7878   # Radarr
+      - 8191:8191   # FlareSolverr
+    environment:
+      - VPN_SERVICE_PROVIDER=mullvad
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${MULLVAD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${MULLVAD_ADDRESS}
+      - SERVER_COUNTRIES=Spain
+      - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET:-192.168.1.0/24}
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ./config/gluetun:/gluetun
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # qBittorrent
+  # ===========================================
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-Europe/Berlin}
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
+    volumes:
+      - ./config/qbittorrent:/config
+      - ${DOWNLOAD_PATH}:/downloads
+    restart: unless-stopped
+
+  # ===========================================
+  # Prowlarr - Indexer manager
+  # ===========================================
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ./config/prowlarr:/config
+    restart: unless-stopped
+
+  # ===========================================
+  # Sonarr - TV Series
+  # ===========================================
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ./config/sonarr:/config
+      - ${DOWNLOAD_PATH}:/downloads
+      - ${MEDIA_PATH}/tv:/tv
+    restart: unless-stopped
+
+  # ===========================================
+  # Radarr - Movies
+  # ===========================================
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ./config/radarr:/config
+      - ${DOWNLOAD_PATH}:/downloads
+      - ${MEDIA_PATH}/movies:/movies
+    restart: unless-stopped
+
+  # ===========================================
+  # Bazarr - Subtitles
+  # ===========================================
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    ports:
+      - 6767:6767
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ./config/bazarr:/config
+      - ${MEDIA_PATH}/tv:/tv
+      - ${MEDIA_PATH}/movies:/movies
+    depends_on:
+      - sonarr
+      - radarr
+    restart: unless-stopped
+
+  # ===========================================
+  # Homepage - Dashboard (config-file based)
+  # ===========================================
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    ports:
+      - 3000:3000
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - HOMEPAGE_VAR_SONARR_API_KEY=${SONARR_API_KEY}
+      - HOMEPAGE_VAR_RADARR_API_KEY=${RADARR_API_KEY}
+      - HOMEPAGE_VAR_PROWLARR_API_KEY=${PROWLARR_API_KEY}
+      - HOMEPAGE_VAR_BAZARR_API_KEY=${BAZARR_API_KEY}
+      - HOMEPAGE_VAR_JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      - HOMEPAGE_VAR_QBITTORRENT_PASSWORD=${QBITTORRENT_PASSWORD}
+    volumes:
+      - ./config/homepage:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  # ===========================================
+  # FlareSolverr - Bypass Cloudflare protection
+  # ===========================================
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - LOG_LEVEL=info
+      - TZ=${TZ:-Europe/Berlin}
+    restart: unless-stopped
+
+  # ===========================================
+  # Jellyfin - Media Server
+  # ===========================================
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    ports:
+      - 8096:8096
+    environment:
+      - PUID=${PUID:-501}
+      - PGID=${PGID:-20}
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ./config/jellyfin:/config
+      - ${MEDIA_PATH}/tv:/data/tvshows
+      - ${MEDIA_PATH}/movies:/data/movies
+    restart: unless-stopped
