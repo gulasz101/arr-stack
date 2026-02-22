@@ -11,17 +11,17 @@ default:
 
 # Decrypt .env.sops → .env (requires age key at ~/.config/sops/age/keys.txt)
 decrypt:
-    sops -d .env.sops > .env
+    sops -d --input-type dotenv --output-type dotenv .env.sops > .env
     @echo "✓ .env decrypted"
 
 # Encrypt .env → .env.sops (requires .sops.yaml with your age public key)
 encrypt:
-    sops -e .env > .env.sops
+    sops -e --input-type dotenv --output-type dotenv .env > .env.sops
     @echo "✓ .env.sops encrypted — safe to commit"
 
 # Edit encrypted secrets in-place (sops handles decrypt/re-encrypt)
 secrets:
-    sops .env.sops
+    sops --input-type dotenv --output-type dotenv .env.sops
 
 # Deploy: decrypt + start/update stack
 deploy: decrypt
