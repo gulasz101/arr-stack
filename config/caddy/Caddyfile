@@ -1,0 +1,48 @@
+# ===========================================
+# 🏴‍☠️ Arr Stack - Caddy Reverse Proxy
+# ===========================================
+# Serves both local (.local) and NetBird (.netbird.cloud) domains.
+# Auto-HTTPS disabled — plain HTTP for LAN use.
+#
+# Services behind gluetun VPN are reached via gluetun:PORT
+# (they share gluetun's network namespace via network_mode: service:gluetun)
+# ===========================================
+
+{
+	auto_https off
+}
+
+# ---- Dashboard ----
+http://arr-box.local, http://arr-box.netbird.cloud {
+	reverse_proxy homepage:3000
+}
+
+# ---- Jellyfin ----
+http://jellyfin.arr-box.local, http://jellyfin.arr-box.netbird.cloud {
+	reverse_proxy jellyfin:8096
+}
+
+# ---- Sonarr (behind gluetun VPN) ----
+http://sonarr.arr-box.local, http://sonarr.arr-box.netbird.cloud {
+	reverse_proxy gluetun:8989
+}
+
+# ---- Radarr (behind gluetun VPN) ----
+http://radarr.arr-box.local, http://radarr.arr-box.netbird.cloud {
+	reverse_proxy gluetun:7878
+}
+
+# ---- Prowlarr (behind gluetun VPN) ----
+http://prowlarr.arr-box.local, http://prowlarr.arr-box.netbird.cloud {
+	reverse_proxy gluetun:9696
+}
+
+# ---- qBittorrent (behind gluetun VPN) ----
+http://qbit.arr-box.local, http://qbit.arr-box.netbird.cloud {
+	reverse_proxy gluetun:8080
+}
+
+# ---- Bazarr ----
+http://bazarr.arr-box.local, http://bazarr.arr-box.netbird.cloud {
+	reverse_proxy bazarr:6767
+}
