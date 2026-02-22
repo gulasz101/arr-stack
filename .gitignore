@@ -1,5 +1,7 @@
 # Environment file with secrets
+# Plaintext environment file — NEVER commit
 .env
+# .env.sops (encrypted) is intentionally tracked in git
 
 # Backup files
 *.bak
@@ -29,6 +31,10 @@ config/flaresolverr/
 
 # Homepage logs
 config/homepage/logs/
+
+# Caddy runtime data (certificates, etc)
+config/caddy/data/
+config/caddy/config/
 
 # ===========================================
 # macOS
