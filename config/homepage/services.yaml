@@ -1,61 +1,62 @@
 # Services configuration
-# Using host.docker.internal to reach services exposed on host ports
+# href: user-facing URL (what opens in browser when clicked)
+# widget url: internal container-to-container URL for live stats
 ---
 - Media Management:
     - Sonarr:
         icon: sonarr.png
-        href: http://localhost:8989
+        href: http://sonarr.arr-box.local
         description: TV Series
         widget:
           type: sonarr
-          url: http://host.docker.internal:8989
+          url: http://gluetun:8989
           key: {{HOMEPAGE_VAR_SONARR_API_KEY}}
 
     - Radarr:
         icon: radarr.png
-        href: http://localhost:7878
+        href: http://radarr.arr-box.local
         description: Movies
         widget:
           type: radarr
-          url: http://host.docker.internal:7878
+          url: http://gluetun:7878
           key: {{HOMEPAGE_VAR_RADARR_API_KEY}}
 
     - Prowlarr:
         icon: prowlarr.png
-        href: http://localhost:9696
+        href: http://prowlarr.arr-box.local
         description: Indexer Manager
         widget:
           type: prowlarr
-          url: http://host.docker.internal:9696
+          url: http://gluetun:9696
           key: {{HOMEPAGE_VAR_PROWLARR_API_KEY}}
 
 - Downloads:
     - qBittorrent:
         icon: qbittorrent.png
-        href: http://localhost:8080
+        href: http://qbit.arr-box.local
         description: Torrent Client
         widget:
           type: qbittorrent
-          url: http://host.docker.internal:8080
+          url: http://gluetun:8080
           username: admin
           password: {{HOMEPAGE_VAR_QBITTORRENT_PASSWORD}}
 
     - Bazarr:
         icon: bazarr.png
-        href: http://localhost:6767
+        href: http://bazarr.arr-box.local
         description: Subtitles
         widget:
           type: bazarr
-          url: http://host.docker.internal:6767
+          url: http://bazarr:6767
           key: {{HOMEPAGE_VAR_BAZARR_API_KEY}}
 
 - Streaming:
     - Jellyfin:
         icon: jellyfin.png
-        href: http://localhost:8096
+        href: http://jellyfin.arr-box.local
         description: Media Server
         widget:
           type: jellyfin
-          url: http://host.docker.internal:8096
+          url: http://jellyfin:8096
           key: {{HOMEPAGE_VAR_JELLYFIN_API_KEY}}
           enableBlocks: true
