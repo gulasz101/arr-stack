@@ -1649,3 +1649,41 @@ curl -s -o /dev/null -w "%{http_code}" http://arr-box.local
 Expected: `200` — the stack came back up automatically, without any manual intervention.
 
 This is the final success criterion: the family can watch TV with the MacBook shut down.
+
+---
+
+## Migration Log
+
+**Completed:** 2026-02-22
+
+### What was migrated
+- Config migrated from MacBook to arr-box (sonarr, radarr, prowlarr, bazarr, qbittorrent, jellyfin)
+- Jellyfin watch history preserved (4944 config files incl. user data, metadata, database)
+- TV shows migrated: 482 files, 185G
+- Movies migrated: 15 files, 54G
+- Total media: 497 files, ~239G transferred via copyparty u2c (parallel chunk upload)
+
+### Infrastructure deployed
+- arrbox user (UID 1100) on OMV and arr-box
+- NFS exports: OMV 3.7T -> /mnt/media, OMV 1.4T -> /mnt/downloads
+- Copyparty permanent service on OMV (port 3923, rw, no auth, LAN-only)
+- Docker Engine 29.2.1 on arr-box
+- arr-stack deployed at /opt/arr-stack
+- Systemd arr-stack.service (autostart after NFS + Docker)
+
+### Access verified
+- All .local subdomain routes (dashboard, jellyfin, sonarr, radarr, prowlarr, qbit, bazarr)
+- NetBird IP (100.96.191.232): dashboard 200, jellyfin 302
+- Jellyfin library scan triggered via API (HTTP 204) — API key: sops-managed
+- VPN active: Mullvad Spain exit node (45.134.213.203)
+- Android TV Jellyfin app: verify manually (http://jellyfin.arr-box.local)
+- NetBird .netbird.cloud domain access: verify from mobile device
+
+### Secrets management
+- .env.sops encrypted with age (key: age1mt6y86q9lhrmky0c0j7xwvacfzpep3w6e7z8zsrr22jj2u49gs6s59h7w2)
+- Age private key stored in 1Password vault "Homelab", item "arr-stack age key"
+- No plaintext secrets committed to GitHub
+
+### MacBook status
+- MacBook arr-stack: stopped (docker compose down during config migration)
+- Media files on MacBook: NOT deleted (delete manually once arr-box confirmed working)
