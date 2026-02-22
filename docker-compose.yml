@@ -1,12 +1,33 @@
 # ===========================================
-# Using 'latest' tags - for pinned versions check:
-# https://github.com/linuxserver/docker-{app}/releases
+# 🏴‍☠️ Arr Stack - Home Media Server
+# ===========================================
+# Access via Caddy reverse proxy:
+#   Local:   http://arr-box.local           (Dashboard)
+#   NetBird: http://arr-box.netbird.cloud   (Dashboard)
+#   Subdomain examples:
+#     http://jellyfin.arr-box.local
+#     http://jellyfin.arr-box.netbird.cloud
 # ===========================================
 
 services:
   # ===========================================
-  # GLUETUN - VPN Container
-  # Using v3 tag for stable releases (recommended by maintainer)
+  # Caddy - Reverse Proxy
+  # ===========================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    ports:
+      - "80:80"
+    volumes:
+      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./config/caddy/data:/data
+      - ./config/caddy/config:/config
+    environment:
+      - TZ=${TZ:-Europe/Berlin}
+    restart: unless-stopped
+
+  # ===========================================
+  # GLUETUN - VPN Container (Mullvad WireGuard)
   # ===========================================
   gluetun:
     image: qmcgaw/gluetun:v3
@@ -28,10 +49,10 @@ services:
       - VPN_TYPE=wireguard
       - WIREGUARD_PRIVATE_KEY=${MULLVAD_PRIVATE_KEY}
       - WIREGUARD_ADDRESSES=${MULLVAD_ADDRESS}
-      - SERVER_COUNTRIES=Spain
+      - SERVER_COUNTRIES=${VPN_COUNTRY:-Spain}
       - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET:-192.168.1.0/24}
-      - PUID=${PUID:-501}
-      - PGID=${PGID:-20}
+      - PUID=${PUID:-1100}
+      - PGID=${PGID:-1100}
       - TZ=${TZ:-Europe/Berlin}
     volumes:
       - ./config/gluetun:/gluetun
@@ -53,14 +74,14 @@ services:
       gluetun:
         condition: service_healthy
     environment:
-      - PUID=${PUID:-501}
-      - PGID=${PGID:-20}
+      - PUID=${PUID:-1100}
+      - PGID=${PGID:-1100}
       - TZ=${TZ:-Europe/Berlin}
       - WEBUI_PORT=8080
       - TORRENTING_PORT=6881
     volumes:
       - ./config/qbittorrent:/config
-      - ${DOWNLOAD_PATH}:/downloads
+      - ${DOWNLOAD_PATH:-/mnt/downloads}:/downloads
     restart: unless-stopped
 
   # ===========================================
@@ -74,8 +95,8 @@ services:
       gluetun:
         condition: service_healthy
     environment:
-      - PUID=${PUID:-501}
-      - PGID=${PGID:-20}
+      - PUID=${PUID:-1100}
+      - PGID=${PGID:-1100}
       - TZ=${TZ:-Europe/Berlin}
     volumes:
       - ./config/prowlarr:/config
@@ -92,13 +113,13 @@ services:
       gluetun:
         condition: service_healthy
     environment:
-      - PUID=${PUID:-501}
-      - PGID=${PGID:-20}
+      - PUID=${PUID:-1100}
+      - PGID=${PGID:-1100}
       - TZ=${TZ:-Europe/Berlin}
     volumes:
       - ./config/sonarr:/config
-      - ${DOWNLOAD_PATH}:/downloads
-      - ${MEDIA_PATH}/tv:/tv
+      - ${DOWNLOAD_PATH:-/mnt/downloads}:/downloads
+      - ${MEDIA_PATH:-/mnt/media}/tv:/tv
     restart: unless-stopped
 
   # ===========================================
@@ -112,13 +133,13 @@ services:
       gluetun:
         condition: service_healthy
     environment:
-      - PUID=${PUID:-501}
-      - PGID=${PGID:-20}
+      - PUID=${PUID:-1100}
+      - PGID=${PGID:-1100}
       - TZ=${TZ:-Europe/Berlin}
     volumes:
       - ./config/radarr:/config
-      - ${DOWNLOAD_PATH}:/downloads
-      - ${MEDIA_PATH}/movies:/movies
+      - ${DOWNLOAD_PATH:-/mnt/downloads}:/downloads
+      - ${MEDIA_PATH:-/mnt/media}/movies:/movies
     restart: unless-stopped
 
   # ===========================================
@@ -130,20 +151,20 @@ services:
     ports:
       - 6767:6767
     environment:
-      - PUID=${PUID:-501}
-      - PGID=${PGID:-20}
+      - PUID=${PUID:-1100}
+      - PGID=${PGID:-1100}
       - TZ=${TZ:-Europe/Berlin}
     volumes:
       - ./config/bazarr:/config
-      - ${MEDIA_PATH}/tv:/tv
-      - ${MEDIA_PATH}/movies:/movies
+      - ${MEDIA_PATH:-/mnt/media}/tv:/tv
+      - ${MEDIA_PATH:-/mnt/media}/movies:/movies
     depends_on:
       - sonarr
       - radarr
     restart: unless-stopped
 
   # ===========================================
-  # Homepage - Dashboard (config-file based)
+  # Homepage - Dashboard
   # ===========================================
   homepage:
     image: ghcr.io/gethomepage/homepage:latest
@@ -151,8 +172,9 @@ services:
     ports:
       - 3000:3000
     environment:
-      - PUID=${PUID:-501}
-      - PGID=${PGID:-20}
+      - PUID=${PUID:-1100}
+      - PGID=${PGID:-1100}
+      - HOMEPAGE_ALLOWED_HOSTS=${ARR_HOSTNAME_LOCAL:-arr-box.local},${ARR_HOSTNAME_NETBIRD:-arr-box.netbird.cloud},localhost
       - HOMEPAGE_VAR_SONARR_API_KEY=${SONARR_API_KEY}
       - HOMEPAGE_VAR_RADARR_API_KEY=${RADARR_API_KEY}
       - HOMEPAGE_VAR_PROWLARR_API_KEY=${PROWLARR_API_KEY}
@@ -188,11 +210,12 @@ services:
     ports:
       - 8096:8096
     environment:
-      - PUID=${PUID:-501}
-      - PGID=${PGID:-20}
+      - PUID=${PUID:-1100}
+      - PGID=${PGID:-1100}
       - TZ=${TZ:-Europe/Berlin}
+      - JELLYFIN_PublishedServerUrl=http://jellyfin.${ARR_HOSTNAME_LOCAL:-arr-box.local}
     volumes:
       - ./config/jellyfin:/config
-      - ${MEDIA_PATH}/tv:/data/tvshows
-      - ${MEDIA_PATH}/movies:/data/movies
+      - ${MEDIA_PATH:-/mnt/media}/tv:/data/tvshows
+      - ${MEDIA_PATH:-/mnt/media}/movies:/data/movies
     restart: unless-stopped
