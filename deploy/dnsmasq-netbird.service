@@ -1,0 +1,15 @@
+[Unit]
+Description=dnsmasq NetBird — arr-stack subdomain DNS on port 5301
+After=network.target netbird.service
+Wants=netbird.service
+
+[Service]
+Type=forking
+PIDFile=/run/dnsmasq-netbird.pid
+ExecStartPre=/usr/sbin/dnsmasq --test -C /etc/dnsmasq-netbird.conf
+ExecStart=/usr/sbin/dnsmasq -x /run/dnsmasq-netbird.pid -C /etc/dnsmasq-netbird.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
