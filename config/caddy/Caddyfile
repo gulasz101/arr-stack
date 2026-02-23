@@ -46,3 +46,8 @@ http://qbit.arr-box.local, http://qbit.arr-box.netbird.cloud {
 http://bazarr.arr-box.local, http://bazarr.arr-box.netbird.cloud {
 	reverse_proxy bazarr:6767
 }
+
+# ---- Catch-all: IP access → dashboard ----
+:80 {
+	reverse_proxy homepage:3000
+}
