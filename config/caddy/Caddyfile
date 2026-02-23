@@ -49,5 +49,7 @@ http://bazarr.arr-box.local, http://bazarr.arr-box.netbird.cloud {
 
 # ---- Catch-all: IP access → dashboard ----
 :80 {
-	reverse_proxy homepage:3000
+	reverse_proxy homepage:3000 {
+		header_up Host arr-box.local
+	}
 }
