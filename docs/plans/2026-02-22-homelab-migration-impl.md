@@ -19,7 +19,7 @@
 | OMV downloads disk (1.4T) | `/srv/dev-disk-by-uuid-b6591cb4-4cc4-4901-aaa2-4feabab33235` |
 | arr-box hostname | `arr-box.local` / `192.168.1.162` |
 | arr-box NetBird | `arr-box.netbird.cloud` / `100.96.191.232` |
-
+| arr-box default user | `gulasz101` (sudo) |
 | arrbox service user | UID `1100` / GID `1100` |
 | MacBook media | `/Users/wojciechgula/Media` (TV: 185G, Movies: 54G) |
 | GitHub repo | `gulasz101/arr-stack` (private, to be created) |
@@ -942,7 +942,7 @@ User=arrbox
 WorkingDirectory=/srv/dev-disk-by-uuid-cda9bf6e-0ed1-4e61-b063-1cbab7351886
 ExecStart=/usr/local/bin/copyparty \
   --port 3923 \
-  --auth arrbox:CHANGEME_SET_PASSWORD \
+  --auth arrbox:YOUR_COPYPARTY_PASSWORD \
   /srv/dev-disk-by-uuid-cda9bf6e-0ed1-4e61-b063-1cbab7351886/media
 Restart=on-failure
 RestartSec=10
@@ -957,8 +957,7 @@ EOF
 Edit the service file to set a real password:
 ```bash
 sudo nano /etc/systemd/system/copyparty.service
-# Change CHANGEME_SET_PASSWORD to a real password
-# Example: --auth arrbox:mediaserver2026
+# Change YOUR_COPYPARTY_PASSWORD to a real password
 ```
 
 **Step 5: Enable and start copyparty**
@@ -1652,6 +1651,221 @@ This is the final success criterion: the family can watch TV with the MacBook sh
 
 ---
 
+---
+
+## Phase 14: DNS — Wildcard Subdomain Resolution
+
+### Task 29: Install dnsmasq on arr-box (LAN listener)
+
+The `*.arr-box.local` and `*.arr-box.netbird.cloud` subdomains require a DNS resolver that returns `arr-box`'s IP for all subdomain queries. mDNS only resolves exact registered hostnames — wildcards require a proper DNS server.
+
+**Architecture:**
+- dnsmasq instance 1: `192.168.1.162:53` — for OPNsense to forward LAN queries
+- dnsmasq instance 2: `100.96.191.232:5301` — for NetBird peers (NetBird holds `:53` on that IP)
+
+**Step 1: Install dnsmasq**
+
+```bash
+sudo apt-get install -y dnsmasq
+```
+
+**Step 2: Configure LAN listener**
+
+```bash
+# /etc/dnsmasq.d/arr-stack.conf
+bind-interfaces
+listen-address=192.168.1.162
+
+address=/.arr-box.local/192.168.1.162
+address=/.arr-box.netbird.cloud/100.96.191.232
+
+server=192.168.1.1  # forward everything else to OPNsense
+```
+
+**Step 3: Configure NetBird listener**
+
+```bash
+# /etc/dnsmasq-netbird.conf
+port=5301
+bind-interfaces
+listen-address=100.96.191.232
+
+address=/.arr-box.local/192.168.1.162
+address=/.arr-box.netbird.cloud/100.96.191.232
+
+no-resolv  # only serves wildcard records — no upstream needed
+```
+
+**Step 4: Create systemd unit for second dnsmasq instance**
+
+```ini
+# /etc/systemd/system/dnsmasq-netbird.service
+[Unit]
+Description=dnsmasq NetBird — arr-stack subdomain DNS on port 5301
+After=network.target netbird.service
+Wants=netbird.service
+
+[Service]
+Type=forking
+PIDFile=/run/dnsmasq-netbird.pid
+ExecStartPre=/usr/sbin/dnsmasq --test -C /etc/dnsmasq-netbird.conf
+ExecStart=/usr/sbin/dnsmasq -x /run/dnsmasq-netbird.pid -C /etc/dnsmasq-netbird.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Step 5: Enable and start both**
+
+```bash
+sudo systemctl restart dnsmasq
+sudo systemctl daemon-reload
+sudo systemctl enable --now dnsmasq-netbird
+```
+
+**Step 6: Verify**
+
+```bash
+dig @192.168.1.162 jellyfin.arr-box.local +short
+# Expected: 192.168.1.162
+
+dig @100.96.191.232 -p 5301 jellyfin.arr-box.netbird.cloud +short
+# Expected: 100.96.191.232
+```
+
+All three config files are committed to `deploy/` in the repo.
+
+### Task 30: Configure OPNsense DNS host overrides
+
+OPNsense runs Dnsmasq for both DHCP and DNS. All LAN clients use it as their resolver.
+
+**Navigate to: Services → Dnsmasq DNS & DHCP → Hosts**
+
+Add a host override for each service:
+
+| Hostname | Domain | IP |
+|---|---|---|
+| `arr-box` | `local` | `192.168.1.162` |
+| `jellyfin.arr-box` | `local` | `192.168.1.162` |
+| `sonarr.arr-box` | `local` | `192.168.1.162` |
+| `radarr.arr-box` | `local` | `192.168.1.162` |
+| `prowlarr.arr-box` | `local` | `192.168.1.162` |
+| `qbit.arr-box` | `local` | `192.168.1.162` |
+| `bazarr.arr-box` | `local` | `192.168.1.162` |
+
+Also add a static DHCP reservation:
+- **Services → ISC DHCPv4 (or Dnsmasq DHCP) → Leases**
+- MAC: `f8:bc:12:6c:22:39` → IP: `192.168.1.162`
+
+**Verify from MacBook:**
+
+```bash
+dig jellyfin.arr-box.local +short
+# Expected: 192.168.1.162
+
+curl -s -o /dev/null -w "%{http_code}" http://jellyfin.arr-box.local
+# Expected: 302
+```
+
+### Task 31: Configure NetBird nameserver routing
+
+In **app.netbird.io → DNS → Nameservers**, add:
+
+| Field | Value |
+|---|---|
+| Name | `arr-stack` |
+| Nameserver IP | `100.96.191.232` |
+| Port | `5301` |
+| Domains | `arr-box.netbird.cloud` |
+| Distribution groups | `All` |
+
+> **Note:** As of 2026-02-23, the NetBird nameserver rule exists in admin but shows `Nameservers: 0/0 Available` on clients — the rule is not being distributed. NetBird Magic DNS is not functioning on any peer. Investigation ongoing; subdomain access over NetBird VPN falls back to direct IP (`http://100.96.191.232`).
+
+---
+
+## Phase 15: Post-Migration Improvements
+
+### Task 32: Disable authentication on *arr services and Bazarr
+
+The stack runs on a trusted LAN behind Caddy. No external access to management services is intended, so authentication adds friction without benefit.
+
+**Sonarr v4 / Radarr v6 / Prowlarr v1 — config.xml**
+
+> ⚠️ **Important:** These versions do NOT support `AuthenticationMethod: None`. Using `None` causes a DryIoc dependency injection crash on startup. Use `External` instead.
+
+Stop containers, edit each `config.xml`:
+
+```xml
+<AuthenticationMethod>External</AuthenticationMethod>
+<AuthenticationRequired>Enabled</AuthenticationRequired>
+```
+
+`External` tells the app to trust auth headers from the upstream reverse proxy. Since Caddy doesn't set auth headers, all requests are accepted. Containers must be stopped before editing — the files are locked during runtime.
+
+```bash
+docker stop sonarr radarr prowlarr
+sed -i 's|<AuthenticationMethod>Forms</AuthenticationMethod>|<AuthenticationMethod>External</AuthenticationMethod>|' config/sonarr/config.xml
+# repeat for radarr, prowlarr
+docker start sonarr radarr prowlarr
+```
+
+**Bazarr — config.yaml**
+
+```bash
+docker stop bazarr
+sed -i 's/type: basic/type: none/' config/bazarr/config/config.yaml
+docker start bazarr
+```
+
+**qBittorrent**
+
+Already configured with subnet whitelist bypass in `qBittorrent.conf`:
+```ini
+WebUI\AuthSubnetWhitelist=192.168.0.0/16, 172.16.0.0/12, 10.0.0.0/8
+WebUI\AuthSubnetWhitelistEnabled=true
+WebUI\LocalHostAuth=false
+```
+All Docker-internal requests (172.x.x.x) bypass authentication automatically.
+
+### Task 33: Add Caddy IP catch-all for direct IP access
+
+When accessing `http://192.168.1.162` or `http://100.96.191.232` directly (bypassing DNS), Caddy has no matching virtual host and returns an empty 200. Add a catch-all:
+
+```caddyfile
+# ---- Catch-all: IP access → dashboard ----
+:80 {
+    reverse_proxy homepage:3000 {
+        header_up Host arr-box.local
+    }
+}
+```
+
+The `header_up Host` directive rewrites the Host header sent to Homepage. Without it, Homepage sees the raw IP as the Host header and rejects it with "Host validation failed" (HOMEPAGE_ALLOWED_HOSTS check).
+
+> **Note:** After `git pull` updates the Caddyfile, `caddy reload` alone is insufficient — git replaces the file inode, and Docker's bind mount still points to the old inode. Always `docker restart caddy` after Caddyfile changes.
+
+### Task 34: Create Jellyfin secondary user
+
+Create a family user account via the Jellyfin API:
+
+```bash
+# Step 1: Get admin token
+TOKEN=$(curl -s -X POST 'http://localhost:8096/Users/AuthenticateByName' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Emby-Authorization: MediaBrowser Client="setup", Device="setup", DeviceId="setup1", Version="1.0"' \
+  -d '{"Username":"ADMIN_USER","Pw":"ADMIN_PASSWORD"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["AccessToken"])')
+
+# Step 2: Create user
+curl -s -X POST 'http://localhost:8096/Users/New' \
+  -H 'Content-Type: application/json' \
+  -H "X-Emby-Authorization: MediaBrowser Client=\"setup\", Device=\"setup\", DeviceId=\"setup1\", Version=\"1.0\", Token=\"$TOKEN\"" \
+  -d '{"Name":"sylwia","Password":"FAMILY_PASSWORD"}'
+```
+
+---
+
 ## Migration Log
 
 **Completed:** 2026-02-22
@@ -1672,17 +1886,28 @@ This is the final success criterion: the family can watch TV with the MacBook sh
 - Systemd arr-stack.service (autostart after NFS + Docker)
 
 ### Access verified
-- All .local subdomain routes (dashboard, jellyfin, sonarr, radarr, prowlarr, qbit, bazarr)
-- NetBird IP (100.96.191.232): dashboard 200, jellyfin 302
-- Jellyfin library scan triggered via API (HTTP 204) — API key: sops-managed
-- VPN active: Mullvad Spain exit node (45.134.213.203)
-- Android TV Jellyfin app: verify manually (http://jellyfin.arr-box.local)
-- NetBird .netbird.cloud domain access: verify from mobile device
+- All `.local` subdomain routes: dashboard, jellyfin, sonarr, radarr, prowlarr, qbit, bazarr ✓
+- NetBird IP (`100.96.191.232`): dashboard 200 ✓, jellyfin 302 ✓
+- Bare IP access (`http://192.168.1.162`, `http://100.96.191.232`): dashboard loads via Caddy catch-all ✓
+- Jellyfin library scan triggered via API (HTTP 204) ✓
+- VPN active: Mullvad Spain exit node (45.134.213.203) ✓
+- qBittorrent confirmed using VPN IP exclusively ✓
+- Android TV Jellyfin app: connect via `http://192.168.1.162:8096` (mDNS subdomain not reliable on Android)
+- NetBird `.netbird.cloud` subdomain routing: pending (Magic DNS not distributing to peers)
 
 ### Secrets management
-- .env.sops encrypted with age (key: age1mt6y86q9lhrmky0c0j7xwvacfzpep3w6e7z8zsrr22jj2u49gs6s59h7w2)
+- `.env.sops` encrypted with age, public key in `.sops.yaml`
 - Age private key stored in 1Password vault "Homelab", item "arr-stack age key"
 - No plaintext secrets committed to GitHub
+
+### Post-migration improvements (2026-02-23)
+- DNS: dnsmasq on arr-box (`192.168.1.162:53` + `100.96.191.232:5301`)
+- OPNsense: host overrides added for all `.arr-box.local` subdomains
+- NetBird nameserver routing configured (pending Magic DNS distribution)
+- Auth disabled: Sonarr, Radarr, Prowlarr, Bazarr (using `External` auth mode)
+- qBittorrent: subnet whitelist bypass already active
+- Jellyfin user `sylwia` created for family access
+- Caddy catch-all `:80` block added for direct IP access
 
 ### MacBook status
 - MacBook arr-stack: stopped (docker compose down during config migration)

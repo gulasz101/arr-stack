@@ -103,11 +103,11 @@ The `arrbox` user is OMV-specific and has read/write access only to the arr-stac
 | `/srv/.../downloads` | arr-box IP only | `rw,sync,no_root_squash,no_subtree_check` |
 
 **Copyparty (permanent service):**
-- Installed via `pip` as the `arrbox` user
+- Installed system-wide via `pip3` (v1.20.8)
 - Runs as a systemd service: `copyparty.service`
 - Port: `3923`
-- Password-protected (admin user)
-- Serves `/srv/.../media` read/write during migration; kept running permanently for future uploads
+- No authentication — LAN-only, trusted network
+- Serves `/srv/.../media` read/write for uploads
 - Access: `http://openmediavault.local:3923`
 
 ### 2. arr-box (arr-box.local / arr-box.netbird.cloud)
@@ -129,9 +129,12 @@ purpose:  runs Docker daemon (via rootless) or is the PUID/PGID for containers
 
 **NFS mounts in `/etc/fstab`:**
 ```
-openmediavault.local:/srv/.../media     /mnt/media      nfs  defaults,_netdev,uid=1100,gid=1100  0 0
-openmediavault.local:/srv/.../downloads /mnt/downloads  nfs  defaults,_netdev,uid=1100,gid=1100  0 0
+# Uses IP (192.168.1.180) instead of hostname to avoid mDNS race at boot
+192.168.1.180:/srv/.../media     /mnt/media      nfs  defaults,_netdev,nofail,soft,timeo=30,retry=3,x-systemd.after=network-online.target  0 0
+192.168.1.180:/srv/.../downloads /mnt/downloads  nfs  defaults,_netdev,nofail,soft,timeo=30,retry=3,x-systemd.after=network-online.target  0 0
 ```
+
+> **Note:** Hostname avoided because mDNS is not available during early boot. A custom `wait-for-network.service` systemd unit ensures the DHCP lease is fully acquired before `network-online.target` is signalled.
 
 **App directory:**
 ```
@@ -373,18 +376,20 @@ Every infrastructure change will be a separate, descriptive commit. Planned comm
 
 ## Success Criteria
 
-- [ ] arr-stack starts automatically on arr-box boot (no manual intervention)
-- [ ] `http://arr-box.local` opens Homepage dashboard on the local network
-- [ ] `http://arr-box.netbird.cloud` opens Homepage dashboard over NetBird
-- [ ] `http://jellyfin.arr-box.local` works from Android TV Jellyfin app
-- [ ] `http://jellyfin.arr-box.netbird.cloud` works from mobile over VPN
-- [ ] All subdomain services reachable on both `.local` and `.netbird.cloud`
-- [ ] Jellyfin watch history migrated (users, progress, libraries)
-- [ ] All TV shows and movies accessible in Jellyfin after migration
-- [ ] `.env.sops` committed to git; no plaintext secrets in repo
-- [ ] age private key stored in 1Password under "Homelab" vault
-- [ ] MacBook arr-stack stopped; MacBook not required for family TV viewing
-- [ ] Copyparty running permanently on OMV for future transfers
+- [x] arr-stack starts automatically on arr-box boot (no manual intervention)
+- [x] `http://arr-box.local` opens Homepage dashboard on the local network
+- [x] `http://arr-box.netbird.cloud` opens Homepage dashboard over NetBird (IP-based works; subdomain routing pending NetBird Magic DNS)
+- [x] `http://jellyfin.arr-box.local` works from Android TV Jellyfin app
+- [ ] `http://jellyfin.arr-box.netbird.cloud` works from mobile over VPN — blocked by NetBird Magic DNS not distributing nameserver rules to clients
+- [x] All `.local` subdomain services reachable (OPNsense host overrides + dnsmasq)
+- [x] Jellyfin watch history migrated (users, progress, libraries)
+- [x] All TV shows and movies accessible in Jellyfin after migration
+- [x] `.env.sops` committed to git; no plaintext secrets in repo
+- [x] age private key stored in 1Password under "Homelab" vault
+- [x] MacBook arr-stack stopped; MacBook not required for family TV viewing
+- [x] Copyparty running permanently on OMV for future transfers
+- [x] All *arr services + Bazarr running without authentication (LAN-trusted)
+- [x] Jellyfin second user `sylwia` created for family access
 
 ---
 
@@ -400,7 +405,10 @@ Every infrastructure change will be a separate, descriptive commit. Planned comm
 
 ## Risk Notes
 
-- **NFS mount failure at boot** — mitigated by `After=remote-fs.target` + `Requires=remote-fs.target` in the systemd unit; stack won't start until NFS is ready
-- **NetBird subdomain routing** — requires NetBird's Magic DNS to resolve `*.arr-box.netbird.cloud`; if wildcard doesn't work, explicit DNS entries may be needed in NetBird admin
+- **NFS mount failure at boot** — mitigated by `After=remote-fs.target` + `Requires=remote-fs.target` in the systemd unit; stack won't start until NFS is ready. A secondary `wait-for-network.service` unit polls for the `192.168.1.0/24` route to guard against DHCP timing gaps.
+- **NFS hostname vs IP** — using hostname `openmediavault.local` in fstab caused silent mount failures at boot (mDNS not ready). Fixed by using the static IP `192.168.1.180` instead.
+- **NetBird subdomain routing** — requires NetBird's Magic DNS + nameserver routing. Two dnsmasq instances on arr-box handle wildcard resolution: one on `192.168.1.162:53` (for OPNsense forwarding), one on `100.96.191.232:5301` (for NetBird peers). NetBird Magic DNS must be configured in the admin panel for subdomain access over VPN.
 - **Jellyfin metadata** — the `config/jellyfin/` directory contains the database, metadata cache, and user watch history; this must be transferred intact
 - **Gluetun VPN on Linux** — needs `/dev/net/tun` device and `NET_ADMIN` capability; standard on Debian with Docker but requires verification
+- **Docker bind mounts and git** — when `git pull` updates a file, Docker containers may still hold the old inode. Affected containers (e.g. caddy) must be restarted (`docker restart caddy`), not just reloaded, after a Caddyfile update.
+- **\*arr auth in newer versions** — Sonarr v4 / Radarr v6 / Prowlarr v1 removed the `None` authentication method. Use `External` + `AuthenticationRequired: DisabledForLocalAddresses` to disable auth for LAN access (all requests via Caddy come from Docker private subnet IPs).
