@@ -61,9 +61,99 @@ ssh arr-box "
 
 Clean up any decrypted files on the Hermes host immediately afterwards.
 
-## Service API access from LAN
+## Cross-service API keys and URLs (THE MOST COMMON SILENT FAILURE)
 
-All services are reachable on `192.168.1.162`. Read credentials from `.env.sops`.
+Sonarr, Radarr, and Prowlarr use `network_mode: service:gluetun`. Inside that network namespace `localhost` is gluetun itself, not the sibling service. Cross-service URLs must point to `http://gluetun:<port>/`, **not** `http://localhost:<port>/`.
+
+After rotating API keys, update **both** ends of every connection:
+
+| Service A stores | Points to | Must contain |
+|---|---|---|
+| Sonarr indexers | Prowlarr | `http://gluetun:9696/` + `PROWLARR_API_KEY` |
+| Radarr indexers | Prowlarr | `http://gluetun:9696/` + `PROWLARR_API_KEY` |
+| Prowlarr Sonarr app | Sonarr | `http://gluetun:8989` + `SONARR_API_KEY` |
+| Prowlarr Radarr app | Radarr | `http://gluetun:7878` + `RADARR_API_KEY` |
+| Bazarr `sonarr.*` | Sonarr | `ip: gluetun`, `port: 8989`, `apikey: SONARR_API_KEY`, `enabled: true` |
+| Bazarr `radarr.*` | Radarr | `ip: gluetun`, `port: 7878`, `apikey: RADARR_API_KEY`, `enabled: true` |
+
+**Symptoms of a mismatch:**
+- Bazarr shows only **Settings** in the navigation and/or red **DOWN** next to Series/Movies.
+- Radarr interactive search says **"No results found"** with `0 active indexers`.
+- Radarr logs show `Torznab: ... [401:Unauthorized]` or `HTTP request failed` for `localhost:9696`.
+
+**Repair script:** `scripts/repair-cross-api-keys.py`. Run it on arr-box with `.env.sops` decrypted into the environment:
+
+```bash
+cd ~/Projects/arr-stack
+SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
+  sops -d --input-type dotenv --output-type dotenv .env.sops > /tmp/arr-env-plain
+set -a
+source /tmp/arr-env-plain
+set +a
+rm -f /tmp/arr-env-plain
+
+scp scripts/repair-cross-api-keys.py arr-box:/tmp/repair-cross-api-keys.py
+ssh arr-box "docker run --rm \
+  -v /tmp/repair-cross-api-keys.py:/script.py:ro \
+  -v /opt/arr-stack/config:/opt/arr-stack/config \
+  -e SONARR_API_KEY=$SONARR_API_KEY \
+  -e RADARR_API_KEY=$RADARR_API_KEY \
+  -e PROWLARR_API_KEY=$PROWLARR_API_KEY \
+  alpine sh -c 'apk add -q python3 && python3 /script.py'"
+
+# Then restart the three containers
+ssh arr-box "docker restart sonarr radarr prowlarr"
+```
+
+This script backs up nothing automatically — take a manual SQLite backup first if you are nervous:
+
+```bash
+TS=$(date +%Y%m%d%H%M)
+ssh arr-box "mkdir -p /opt/arr-stack/config-backups-$TS && \
+  cp /opt/arr-stack/config/sonarr/sonarr.db \
+     /opt/arr-stack/config/radarr/radarr.db \
+     /opt/arr-stack/config/prowlarr/prowlarr.db \
+     /opt/arr-stack/config-backups-$TS/"
+```
+
+**Verification:**
+
+```bash
+# Radarr should find releases for a movie
+ssh arr-box "docker run --rm --network arr-stack_default alpine sh -c \
+  'apk add -q curl jq; \
+   curl -s -H \"X-Api-Key: ${RADARR_API_KEY}\" \
+     \"http://gluetun:7878/api/v3/release?movieId=27\" | jq length'"
+# Should return a number greater than 0
+```
+
+## Bazarr: Series/Movies navigation missing
+
+If Bazarr only shows **Settings** in the left navigation, the Sonarr or Radarr integration is disabled or unhealthy. Go to:
+
+1. `http://192.168.1.162:6767/settings/sonarr` — toggle **Enabled**, verify `gluetun:8989` and correct `SONARR_API_KEY`, click **Test**, then **Save**.
+2. `http://192.168.1.162:6767/settings/radarr` — toggle **Enabled**, verify `gluetun:7878` and correct `RADARR_API_KEY`, click **Save**.
+
+The main navigation (Series, Movies, History, Wanted) reappears immediately after saving.
+
+## Bazarr subtitle paths
+
+Bazarr container mounts:
+- `/mnt/media/tv` → `/tv`
+- `/mnt/media/movies` → `/movies`
+
+If Bazarr reports a subtitle path like `/movies/Foo (2023)/Foo.pl.srt`, the real host path is `/mnt/media/movies/Foo (2023)/Foo.pl.srt`. No path mapping is needed when Sonarr/Radarr and Bazarr use the same host mounts. A missing file usually means a permission problem (`PermissionError` in Bazarr logs) or the download simply hadn't finished when the check ran.
+
+## Known pitfalls
+
+- **Never** commit `.env`, decrypted env files, or API keys to the repo.
+- **Never** write the sudo password into any file, chat, or prompt.
+- Radarr/Sonarr/Prowlarr auth method must be `External` in `config.xml` for API-key-only LAN access to work.
+- Bazarr requires the `X-API-KEY` header, not a query parameter, and its case matters.
+- qBittorrent WebUI login is cookie-based: POST username/password to `/api/v2/auth/login`, then use the cookie jar.
+- Jellyfin API key is **not** rotated lightly; it is tied to registered devices.
+- gluetun is the network gateway for Sonarr/Radarr/Prowlarr/qBittorrent/FlareSolverr. Bazarr, Homepage, Jellyfin, Caddy use normal Docker bridge ports.
+
 
 ### Sonarr
 

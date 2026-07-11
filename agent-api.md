@@ -523,13 +523,94 @@ ssh arr-box "
 
 ---
 
-## 10. Troubleshooting quick reference
+## 10. Cross-service API keys and URLs (silent killers)
+
+After rotating credentials, update **both ends** of every connection. The worst failures are silent: Bazarr loses its nav, Radarr reports "0 active indexers".
+
+### 10.1 Why `localhost` is wrong
+
+Sonarr, Radarr, Prowlarr, qBittorrent, and FlareSolverr use `network_mode: service:gluetun`. Inside that namespace `localhost` is gluetun, not the sibling container. Cross-service URLs must use `http://gluetun:<port>/`.
+
+| Stored in | Points to | Required host | Required key |
+|---|---|---|---|
+| Sonarr indexers (`radarr.db` `Indexers`) | Prowlarr | `gluetun:9696` | `PROWLARR_API_KEY` |
+| Radarr indexers (`sonarr.db` `Indexers`) | Prowlarr | `gluetun:9696` | `PROWLARR_API_KEY` |
+| Prowlarr Sonarr app (`prowlarr.db` `Applications`) | Sonarr | `gluetun:8989` | `SONARR_API_KEY` |
+| Prowlarr Radarr app (`prowlarr.db` `Applications`) | Radarr | `gluetun:7878` | `RADARR_API_KEY` |
+| Bazarr `config.yaml` `sonarr.*` | Sonarr | `gluetun:8989` | `SONARR_API_KEY`, `enabled: true` |
+| Bazarr `config.yaml` `radarr.*` | Radarr | `gluetun:7878` | `RADARR_API_KEY`, `enabled: true` |
+
+### 10.2 Automated repair
+
+Repo script: `scripts/repair-cross-api-keys.py`.
+
+```bash
+# 1. Decrypt .env.sops
+SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
+  sops -d --input-type dotenv --output-type dotenv \
+  ~/Projects/arr-stack/.env.sops > /tmp/arr-env-plain
+set -a
+source /tmp/arr-env-plain
+set +a
+rm -f /tmp/arr-env-plain
+
+# 2. Backup the three DBs
+TS=$(date +%Y%m%d%H%M)
+ssh arr-box "mkdir -p /opt/arr-stack/config-backups-$TS && \
+  cp /opt/arr-stack/config/sonarr/sonarr.db \
+     /opt/arr-stack/config/radarr/radarr.db \
+     /opt/arr-stack/config/prowlarr/prowlarr.db \
+     /opt/arr-stack/config-backups-$TS/"
+
+# 3. Run the repair
+scp ~/Projects/arr-stack/scripts/repair-cross-api-keys.py arr-box:/tmp/repair-cross-api-keys.py
+ssh arr-box "docker run --rm \
+  -v /tmp/repair-cross-api-keys.py:/script.py:ro \
+  -v /opt/arr-stack/config:/opt/arr-stack/config \
+  -e SONARR_API_KEY=$SONARR_API_KEY \
+  -e RADARR_API_KEY=$RADARR_API_KEY \
+  -e PROWLARR_API_KEY=$PROWLARR_API_KEY \
+  alpine sh -c 'apk add -q python3 && python3 /script.py'"
+
+# 4. Restart the three containers
+ssh arr-box "docker restart sonarr radarr prowlarr"
+```
+
+### 10.3 Manual Bazarr enable
+
+If Bazarr only shows **Settings** in the left nav, the integrations are disabled. Use the web UI:
+
+1. `http://192.168.1.162:6767/settings/sonarr` → enable, host `gluetun`, port `8989`, key `SONARR_API_KEY`, Test, Save.
+2. `http://192.168.1.162:6767/settings/radarr` → enable, host `gluetun`, port `7878`, key `RADARR_API_KEY`, Save.
+
+Navigation reappears immediately.
+
+### 10.4 Verify indexer search works
+
+```bash
+# Find a Radarr movie id
+MOVIE_ID=$(curl -s -H "X-Api-Key: ${RADARR_API_KEY}" \
+  "http://192.168.1.162:7878/api/v3/movie" | jq -r '.[0].id')
+
+# Search
+COUNT=$(curl -s -H "X-Api-Key: ${RADARR_API_KEY}" \
+  "http://192.168.1.162:7878/api/v3/release?movieId=${MOVIE_ID}" | jq length)
+echo "Radarr found $COUNT releases for movie $MOVIE_ID"
+```
+
+A number greater than 0 means indexers are healthy.
+
+---
+
+## 11. Troubleshooting quick reference
 
 | Symptom | First thing to check |
 |---|---|
 | No service responds | `ssh arr-box "docker ps"` — is the container up? |
 | VPN-side services down (qBit, Sonarr, Radarr, Prowlarr, FlareSolverr) | `docker logs gluetun` and exit IP |
 | Bazarr 401/405 | Are you using `X-API-KEY` header? Query-param auth fails. |
+| Bazarr only shows Settings | Sonarr/Radarr integrations disabled or unhealthy; fix keys and URLs, then enable in UI. |
+| Radarr interactive search "No results found" | `0 active indexers` → check indexer baseUrl/key and Prowlarr app config. |
 | Radarr redirects to login | `AuthenticationMethod` in `config.xml` must be `External` |
 | qBittorrent says `Ok.` but next call fails | Did you use `-c` to save the cookie and `-b` to send it? |
 | File edit fails with permission denied | Use the Docker-root trick; `/opt/arr-stack` is owned by UID 1100. |
@@ -537,7 +618,7 @@ ssh arr-box "
 
 ---
 
-## 11. Safety checklist before any edit
+## 12. Safety checklist before any edit
 
 1. Is the change reflected in the `gulasz101/arr-stack` repo first?
 2. Are all credentials loaded from `.env.sops`, never typed into tracked files?
